@@ -1,3 +1,5 @@
+import torch
+
 from src.metrics.tracker import MetricTracker
 from src.trainer.base_trainer import BaseTrainer
 
@@ -34,25 +36,35 @@ class Trainer(BaseTrainer):
             metric_funcs = self.metrics["train"]
             self.optimizer.zero_grad()
 
-        outputs = self.model(**batch)
-        batch.update(outputs)
-
-        all_losses = self.criterion(**batch)
-        batch.update(all_losses)
+        with torch.autocast(
+            device_type="cuda", dtype=torch.float16, enabled=self.use_amp
+        ):
+            outputs = self.model(**batch)
+            batch.update(outputs)
+            all_losses = self.criterion(**batch)
+            batch.update(all_losses)
 
         if self.is_train:
-            batch["loss"].backward()  # sum of all losses is always called loss
+            self.scaler.scale(batch["loss"]).backward()
+            self.scaler.unscale_(self.optimizer)
             self._clip_grad_norm()
-            self.optimizer.step()
-            if self.lr_scheduler is not None:
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+            if self.lr_scheduler is not None and self.cfg_trainer.get(
+                "scheduler_step_per_batch", False
+            ):
                 self.lr_scheduler.step()
 
+        batch_size = batch["labels"].shape[0]
         # update metrics for each loss (in case of multiple losses)
         for loss_name in self.config.writer.loss_names:
-            metrics.update(loss_name, batch[loss_name].item())
+            metrics.update(loss_name, batch[loss_name].item(), n=batch_size)
 
         for met in metric_funcs:
-            metrics.update(met.name, met(**batch))
+            if getattr(met, "is_epoch_metric", False):
+                met.update(**batch)
+            else:
+                metrics.update(met.name, met(**batch), n=batch_size)
         return batch
 
     def _log_batch(self, batch_idx, batch, mode="train"):
@@ -77,3 +89,23 @@ class Trainer(BaseTrainer):
         else:
             # Log Stuff
             pass
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.use_amp = bool(
+            self.cfg_trainer.get("use_amp", False)
+            and str(self.device).startswith("cuda")
+        )
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
+
+    @staticmethod
+    def _reset_epoch_metrics(metric_functions):
+        for metric in metric_functions:
+            if getattr(metric, "is_epoch_metric", False):
+                metric.reset()
+
+    @staticmethod
+    def _finalize_epoch_metrics(metric_functions, tracker):
+        for metric in metric_functions:
+            if getattr(metric, "is_epoch_metric", False):
+                tracker.update(metric.name, metric.compute())

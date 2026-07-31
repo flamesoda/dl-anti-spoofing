@@ -200,6 +200,7 @@ class BaseTrainer:
         self.is_train = True
         self.model.train()
         self.train_metrics.reset()
+        self._reset_epoch_metrics(self.metrics["train"])
         self.writer.set_step((epoch - 1) * self.epoch_len)
         self.writer.add_scalar("epoch", epoch)
         for batch_idx, batch in enumerate(
@@ -228,9 +229,8 @@ class BaseTrainer:
                         epoch, self._progress(batch_idx), batch["loss"].item()
                     )
                 )
-                self.writer.add_scalar(
-                    "learning rate", self.lr_scheduler.get_last_lr()[0]
-                )
+                learning_rate = self.optimizer.param_groups[0]["lr"]
+                self.writer.add_scalar("learning rate", learning_rate)
                 self._log_scalars(self.train_metrics)
                 self._log_batch(batch_idx, batch)
                 # we don't want to reset train metrics at the start of every epoch
@@ -240,7 +240,13 @@ class BaseTrainer:
             if batch_idx + 1 >= self.epoch_len:
                 break
 
+        self._finalize_epoch_metrics(self.metrics["train"], self.train_metrics)
         logs = last_train_metrics
+
+        if self.lr_scheduler is not None and not self.cfg_trainer.get(
+            "scheduler_step_per_batch", False
+        ):
+            self.lr_scheduler.step()
 
         # Run val/test
         for part, dataloader in self.evaluation_dataloaders.items():
@@ -263,6 +269,7 @@ class BaseTrainer:
         self.is_train = False
         self.model.eval()
         self.evaluation_metrics.reset()
+        self._reset_epoch_metrics(self.metrics["inference"])
         with torch.no_grad():
             for batch_idx, batch in tqdm(
                 enumerate(dataloader),
@@ -273,6 +280,9 @@ class BaseTrainer:
                     batch,
                     metrics=self.evaluation_metrics,
                 )
+            self._finalize_epoch_metrics(
+                self.metrics["inference"], self.evaluation_metrics
+            )
             self.writer.set_step(epoch * self.epoch_len, part)
             self._log_scalars(self.evaluation_metrics)
             self._log_batch(
@@ -305,9 +315,9 @@ class BaseTrainer:
                 # check whether model performance improved or not,
                 # according to specified metric(mnt_metric)
                 if self.mnt_mode == "min":
-                    improved = logs[self.mnt_metric] <= self.mnt_best
+                    improved = logs[self.mnt_metric] < self.mnt_best
                 elif self.mnt_mode == "max":
-                    improved = logs[self.mnt_metric] >= self.mnt_best
+                    improved = logs[self.mnt_metric] > self.mnt_best
                 else:
                     improved = False
             except KeyError:

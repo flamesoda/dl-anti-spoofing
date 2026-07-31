@@ -1,0 +1,9 @@
+train:
+  - _target_: src.metrics.BinaryAccuracy
+    name: Accuracy
+inference:
+  - _target_: src.metrics.BinaryAccuracy
+    name: Accuracy
+  - _target_: src.metrics.EqualErrorRate
+    bonafide_label: 1
+    name: EER

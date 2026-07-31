@@ -14,12 +14,18 @@ def collate_fn(dataset_items: list[dict]):
             of the tensors.
     """
 
+    if not dataset_items:
+        raise ValueError("Cannot collate an empty batch")
+
     result_batch = {}
-
-    # example of collate_fn
-    result_batch["data_object"] = torch.vstack(
-        [elem["data_object"] for elem in dataset_items]
-    )
-    result_batch["labels"] = torch.tensor([elem["labels"] for elem in dataset_items])
-
+    for key in dataset_items[0]:
+        values = [item[key] for item in dataset_items]
+        first = values[0]
+        if isinstance(first, torch.Tensor):
+            result_batch[key] = torch.stack(values)
+        elif isinstance(first, (int, float, bool)):
+            result_batch[key] = torch.tensor(values)
+        else:
+            # Keep metadata such as utterance and attack identifiers on CPU.
+            result_batch[key] = values
     return result_batch

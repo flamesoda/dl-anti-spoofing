@@ -109,6 +109,7 @@ wandb/
 outputs/
 
 # editor, os cache directory
+.DS_Store
 .vscode/
 .idea/
 __MACOSX/

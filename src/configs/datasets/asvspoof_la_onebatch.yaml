@@ -1,0 +1,22 @@
+train:
+  _target_: src.datasets.ASVspoof2019LADataset
+  root_dir: ${oc.env:ASVSPOOF_LA_ROOT,./data/ASVspoof2019_LA}
+  partition: dev
+  balanced_limit: 8
+  balanced_sampling: false
+  shuffle_index: false
+  feature_extractor:
+    _target_: src.transforms.LogPowerSpectrogram
+    max_frames: 600
+    crop_mode: start
+
+dev:
+  _target_: src.datasets.ASVspoof2019LADataset
+  root_dir: ${oc.env:ASVSPOOF_LA_ROOT,./data/ASVspoof2019_LA}
+  partition: dev
+  balanced_limit: 8
+  shuffle_index: false
+  feature_extractor:
+    _target_: src.transforms.LogPowerSpectrogram
+    max_frames: 600
+    crop_mode: start

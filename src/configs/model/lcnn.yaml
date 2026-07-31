@@ -1,0 +1,5 @@
+_target_: src.model.STCLightCNN
+input_frequency_bins: 863
+input_frames: 600
+dropout: 0.75
+n_classes: 2

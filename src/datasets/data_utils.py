@@ -3,6 +3,7 @@ from itertools import repeat
 from hydra.utils import instantiate
 
 from src.datasets.collate import collate_fn
+from src.datasets.sampler import BalancedClassSampler
 from src.utils.init_utils import set_worker_seed
 
 
@@ -75,12 +76,22 @@ def get_dataloaders(config, device):
             f"be larger than the dataset length ({len(dataset)})"
         )
 
+        sampler = None
+        shuffle = dataset_partition == "train"
+        if shuffle and getattr(dataset, "balanced_sampling", False):
+            sampler = BalancedClassSampler(
+                labels=dataset.labels,
+                batch_size=config.dataloader.batch_size,
+            )
+            shuffle = False
+
         partition_dataloader = instantiate(
             config.dataloader,
             dataset=dataset,
             collate_fn=collate_fn,
             drop_last=(dataset_partition == "train"),
-            shuffle=(dataset_partition == "train"),
+            shuffle=shuffle,
+            sampler=sampler,
             worker_init_fn=set_worker_seed,
         )
         dataloaders[dataset_partition] = partition_dataloader

@@ -1,0 +1,15 @@
+defaults:
+  - model: lcnn
+  - metrics: antispoof
+  - datasets: asvspoof_la_eval
+  - dataloader: asvspoof
+  - transforms: none
+  - _self_
+
+inferencer:
+  device_tensors: ["spectrogram", "labels"]
+  device: auto
+  save_path: submissions
+  submission_filename: your_university_username.csv
+  seed: 1
+  from_pretrained: null

@@ -1,0 +1,48 @@
+defaults:
+  - model: lcnn
+  - writer: wandb
+  - metrics: antispoof
+  - datasets: asvspoof_la
+  - dataloader: asvspoof
+  - transforms: none
+  - _self_
+
+optimizer:
+  _target_: torch.optim.Adam
+  lr: 3e-4
+  betas: [0.9, 0.999]
+  eps: 1e-8
+
+lr_scheduler:
+  _target_: torch.optim.lr_scheduler.StepLR
+  step_size: 10
+  gamma: 0.5
+
+loss_function:
+  _target_: src.loss.CrossEntropyLoss
+
+trainer:
+  log_step: 50
+  n_epochs: 30
+  epoch_len: null
+  device_tensors: ["spectrogram", "labels"]
+  resume_from: null
+  from_pretrained: null
+  device: auto
+  use_amp: true
+  scheduler_step_per_batch: false
+  max_grad_norm: 10.0
+  override: false
+  monitor: "min dev_EER"
+  save_period: 5
+  early_stop: 30
+  save_dir: saved
+  seed: 1
+
+writer:
+  project_name: voice-anti-spoofing
+  run_name: lcnn_stft_ce
+  loss_names: ["loss"]
+  mode: online
+  log_checkpoints: false
+  save_code: true

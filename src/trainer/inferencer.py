@@ -1,3 +1,5 @@
+import csv
+
 import torch
 from tqdm.auto import tqdm
 
@@ -76,6 +78,11 @@ class Inferencer(BaseTrainer):
         else:
             self.evaluation_metrics = None
 
+        self.submission_filename = self.cfg_trainer.get(
+            "submission_filename", "predictions.csv"
+        )
+        self._score_rows = []
+
         if not skip_model_load:
             # init model
             self._from_pretrained(config.inferencer.get("from_pretrained"))
@@ -124,31 +131,17 @@ class Inferencer(BaseTrainer):
 
         if metrics is not None:
             for met in self.metrics["inference"]:
-                metrics.update(met.name, met(**batch))
+                if getattr(met, "is_epoch_metric", False):
+                    met.update(**batch)
+                else:
+                    metrics.update(met.name, met(**batch), n=batch["labels"].shape[0])
 
         # Some saving logic. This is an example
         # Use if you need to save predictions on disk
 
-        batch_size = batch["logits"].shape[0]
-        current_id = batch_idx * batch_size
-
-        for i in range(batch_size):
-            # clone because of
-            # https://github.com/pytorch/pytorch/issues/1995
-            logits = batch["logits"][i].clone()
-            label = batch["labels"][i].clone()
-            pred_label = logits.argmax(dim=-1)
-
-            output_id = current_id + i
-
-            output = {
-                "pred_label": pred_label,
-                "label": label,
-            }
-
-            if self.save_path is not None:
-                # you can use safetensors or other lib here
-                torch.save(output, self.save_path / part / f"output_{output_id}.pth")
+        scores = batch["scores"].detach().cpu().tolist()
+        for utterance_id, score in zip(batch["utterance_id"], scores):
+            self._score_rows.append((utterance_id, float(score)))
 
         return batch
 
@@ -166,7 +159,12 @@ class Inferencer(BaseTrainer):
         self.is_train = False
         self.model.eval()
 
-        self.evaluation_metrics.reset()
+        if self.evaluation_metrics is not None:
+            self.evaluation_metrics.reset()
+            for metric in self.metrics["inference"]:
+                if getattr(metric, "is_epoch_metric", False):
+                    metric.reset()
+        self._score_rows = []
 
         # create Save dir
         if self.save_path is not None:
@@ -185,4 +183,19 @@ class Inferencer(BaseTrainer):
                     metrics=self.evaluation_metrics,
                 )
 
+        if self.save_path is not None:
+            filename = (
+                self.submission_filename if part == "eval" else f"{part}_scores.csv"
+            )
+            output_path = self.save_path / filename
+            with output_path.open("w", newline="", encoding="utf-8") as file:
+                writer = csv.writer(file)
+                writer.writerows(self._score_rows)
+            print(f"Saved {len(self._score_rows)} scores to {output_path}")
+
+        if self.evaluation_metrics is None:
+            return {}
+        for metric in self.metrics["inference"]:
+            if getattr(metric, "is_epoch_metric", False):
+                self.evaluation_metrics.update(metric.name, metric.compute())
         return self.evaluation_metrics.result()
