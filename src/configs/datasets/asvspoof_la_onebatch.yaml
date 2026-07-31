@@ -9,6 +9,7 @@ train:
     _target_: src.transforms.LogPowerSpectrogram
     max_frames: 600
     crop_mode: start
+    short_input_mode: repeat
 
 dev:
   _target_: src.datasets.ASVspoof2019LADataset
@@ -20,3 +21,4 @@ dev:
     _target_: src.transforms.LogPowerSpectrogram
     max_frames: 600
     crop_mode: start
+    short_input_mode: repeat

@@ -10,5 +10,6 @@ eval:
     hop_seconds: 0.0081
     max_frames: 600
     crop_mode: start
+    short_input_mode: repeat
     center: true
   instance_transforms: ${transforms.instance_transforms.inference}

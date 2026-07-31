@@ -18,7 +18,8 @@ front end described by the Speech Technology Center (STC):
 - 1724-point FFT and 1724-sample periodic Blackman window;
 - 0.0081 s hop, rounded to 130 samples;
 - 863 one-sided frequency bins;
-- the first 600 frames are retained and shorter inputs are zero-padded;
+- the first 600 frames are retained; shorter waveforms are repeated
+  cyclically before STFT instead of being padded with literal feature zeros;
 - no speech activity detection and no feature normalization.
 
 The classifier follows the STC LCNN topology. Every convolution produces two
