@@ -172,7 +172,7 @@ class BaseTrainer:
 
             # print logged information to the screen
             for key, value in logs.items():
-                self.logger.info(f"    {key:15s}: {value}")
+                self.logger.info("    %-15s: %s", key, value)
 
             # evaluate model performance according to configured metric,
             # save best checkpoint as model_best
@@ -509,7 +509,14 @@ class BaseTrainer:
         """
         resume_path = str(resume_path)
         self.logger.info(f"Loading checkpoint: {resume_path} ...")
-        checkpoint = torch.load(resume_path, self.device)
+        # Trainer checkpoints contain the Hydra/OmegaConf configuration in
+        # addition to tensor weights. PyTorch 2.6 defaults ``weights_only``
+        # to True, which rejects these trusted project-owned objects.
+        checkpoint = torch.load(
+            resume_path,
+            self.device,
+            weights_only=False,
+        )
         self.start_epoch = checkpoint["epoch"] + 1
         self.mnt_best = checkpoint["monitor_best"]
 
@@ -555,7 +562,13 @@ class BaseTrainer:
             self.logger.info(f"Loading model weights from: {pretrained_path} ...")
         else:
             print(f"Loading model weights from: {pretrained_path} ...")
-        checkpoint = torch.load(pretrained_path, self.device)
+        # See ``_resume_checkpoint``: project checkpoints contain OmegaConf
+        # objects and therefore cannot be read by the weights-only loader.
+        checkpoint = torch.load(
+            pretrained_path,
+            self.device,
+            weights_only=False,
+        )
 
         if checkpoint.get("state_dict") is not None:
             self.model.load_state_dict(checkpoint["state_dict"])
