@@ -1,73 +1,59 @@
-# Voice anti-spoofing with Light CNN
+# LightCNN for ASVspoof 2019
 
-This repository implements a countermeasure for the Logical Access (LA)
-partition of ASVspoof 2019. It is built directly on the course PyTorch Project
-Template and keeps its Hydra configuration, trainer, checkpointing, and WandB
-integration.
+This repository contains my solution for the voice anti-spoofing homework. The
+task is to distinguish bona fide speech from spoofed speech on the Logical
+Access partition of ASVspoof 2019.
 
-The system is an independent implementation based on the papers listed in
-[References](#references). No external LCNN implementation or pretrained model
-is used.
+The project is based on the course PyTorch template. I kept its Hydra
+configuration, trainer, checkpointing and WandB logging, and added the dataset,
+STFT front-end, LightCNN model, EER metric and submission code needed for this
+task.
 
-## Method
+## Model
 
-The input waveform is converted to a raw log-power spectrogram with the FFT
-front end described by the Speech Technology Center (STC):
+Audio is converted to a log-power spectrogram before it is passed to the
+network. The front-end uses the settings from the STC paper:
 
 - 16 kHz mono audio;
-- 1724-point FFT and 1724-sample periodic Blackman window;
-- 0.0081 s hop, rounded to 130 samples;
-- 863 one-sided frequency bins;
-- the first 600 frames are retained; shorter waveforms are repeated
-  cyclically before STFT instead of being padded with literal feature zeros;
-- no speech activity detection and no feature normalization.
+- a 1724-sample periodic Blackman window;
+- 1724-point FFT;
+- 130-sample hop;
+- 863 frequency bins and at most 600 frames.
 
-The classifier follows the STC LCNN topology. Every convolution produces two
-competing feature maps per output channel and an MFM 2/1 activation retains
-their element-wise maximum. The convolutional stack is:
+Recordings that are shorter than the required input length are repeated instead
+of being padded with zeros. Longer recordings are cropped to the first 600
+frames.
 
-```text
-Conv5x5-MFM(32) -> Pool
-Conv1x1-MFM(32) -> BN -> Conv3x3-MFM(48) -> Pool -> BN
-Conv1x1-MFM(48) -> BN -> Conv3x3-MFM(64) -> Pool
-Conv1x1-MFM(64) -> BN -> Conv3x3-MFM(32) -> BN
-Conv1x1-MFM(32) -> BN -> Conv3x3-MFM(32) -> Pool
-Flatten -> FC(160) -> MFM(80) -> Dropout(0.75) -> BN -> FC(2)
-```
+The classifier is an LCNN with Max-Feature-Map activations. Its convolutional
+part is followed by a 160-unit fully connected layer, MFM, dropout, BatchNorm
+and a two-class output layer. The dropout layer is placed before the final
+BatchNorm as required by the assignment. The complete model has 10,198,818
+trainable parameters.
 
-The final dropout is deliberately placed before the last BatchNorm, as required
-by the homework. The model has 10,198,818 trainable parameters for a
-`1 x 863 x 600` input. Same-padding convolutions resolve the inconsistent
-spatial sizes printed in Table 1 of the STC paper.
+I used cross-entropy loss rather than A-Softmax. Training batches are balanced:
+half of every batch is bona fide and half is spoof. Development and evaluation
+data are not resampled.
 
-Training uses cross-entropy instead of A-Softmax. The comparative study found
-ordinary sigmoid/cross-entropy competitive with margin-based objectives and
-showed that variation between random seeds can exceed the difference between
-losses. The default optimizer is Adam with learning rate `3e-4`; the rate is
-halved every ten epochs. Every train mini-batch contains the same number of
-bona fide and spoof trials; the development and evaluation protocols are never
-resampled.
-
-Labels are `spoof=0` and `bonafide=1`. The score used for EER and submission is
+Labels are encoded as `spoof = 0` and `bonafide = 1`. The score written to the
+submission is:
 
 ```text
 bonafide_logit - spoof_logit
 ```
 
-so a larger value always supports the bona fide hypothesis.
-
-## Repository structure
+## Project structure
 
 ```text
-src/datasets/asvspoof2019.py       protocol parser and FLAC loading
-src/transforms/stft.py             Blackman log-power STFT
-src/model/lcnn.py                  MFM and STC Light CNN
-src/metrics/eer.py                 official pooled EER implementation
-src/trainer/                       training, epoch EER, inference and CSV export
-src/configs/lcnn*.yaml             train, one-batch and inference configs
-scripts/validate_submission.py     grading-format and EER check
-scripts/plot_training_history.py   report-ready plots from WandB CSV
-tests/                              deterministic unit tests
+src/datasets/asvspoof2019.py   ASVspoof protocol parsing and audio loading
+src/transforms/stft.py         log-power STFT front-end
+src/model/lcnn.py              LightCNN and MFM layers
+src/metrics/eer.py             pooled EER calculation
+src/trainer/                   training and inference loops
+src/configs/lcnn.yaml          training configuration
+src/configs/lcnn_inference.yaml
+scripts/validate_submission.py CSV format and EER check
+train.py                       training entry point
+inference.py                   evaluation entry point
 ```
 
 ## Installation
@@ -79,162 +65,89 @@ python3 -m venv project_env
 source project_env/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-pre-commit install
 ```
 
-Do not put API keys or private GitHub tokens in source files. Authenticate
-WandB interactively or through the `WANDB_API_KEY` secret provided by Kaggle or
-the execution environment.
+WandB authentication can be done interactively with `wandb login` or through a
+`WANDB_API_KEY` environment variable. API keys and GitHub tokens should not be
+stored in the repository.
 
 ## Dataset
 
-Set `ASVSPOOF_LA_ROOT` to the directory containing the official LA split and
-protocol directories:
+Set `ASVSPOOF_LA_ROOT` to the directory that contains the three LA partitions
+and the protocol directory:
 
 ```text
-ASVspoof2019_LA_root/
-├── ASVspoof2019_LA_train/flac/*.flac
-├── ASVspoof2019_LA_dev/flac/*.flac
-├── ASVspoof2019_LA_eval/flac/*.flac
+ASVspoof2019_LA/
+├── ASVspoof2019_LA_train/flac/
+├── ASVspoof2019_LA_dev/flac/
+├── ASVspoof2019_LA_eval/flac/
 └── ASVspoof2019_LA_cm_protocols/
-    ├── ASVspoof2019.LA.cm.train.trn.txt
-    ├── ASVspoof2019.LA.cm.dev.trl.txt
-    └── ASVspoof2019.LA.cm.eval.trl.txt
 ```
+
+For example:
 
 ```bash
-export ASVSPOOF_LA_ROOT=/absolute/path/to/ASVspoof2019_LA_root
+export ASVSPOOF_LA_ROOT=/absolute/path/to/ASVspoof2019_LA
 ```
 
-The dataset class indexes only protocol entries. This avoids silently scoring
-extra FLAC files included in some redistributed archives. Expected protocol
-sizes are 25,380 train, 24,844 development, and 71,237 evaluation trials.
+The code reads file names from the official protocols. The expected split
+sizes are 25,380 train files, 24,844 development files and 71,237 evaluation
+files.
 
-On Kaggle, point the variable at the attached input directory. It can also be
-overridden directly through Hydra:
+## Training
 
-```bash
-python train.py -cn=lcnn \
-  datasets.train.root_dir=/kaggle/input/.../LA \
-  datasets.dev.root_dir=/kaggle/input/.../LA
-```
-
-## Tests
-
-Run deterministic unit tests before starting an expensive experiment:
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-The tests verify the official EER convention, MFM channel pairing, STFT shape,
-score direction, and the complete LCNN forward pass.
-
-## One-batch overfitting test
-
-The one-batch config selects four bona fide and four spoof development samples
-and uses the same fixed batch for training and evaluation:
-
-```bash
-python train.py -cn=lcnn_onebatch \
-  writer.run_name=lcnn_onebatch_seed1 \
-  trainer.seed=1
-```
-
-The loss should approach zero and accuracy should approach 1.0. EER is useful
-as an additional check but is very coarse for only eight trials. Passing this
-test does not establish evaluation quality; failing it indicates a pipeline or
-optimization problem.
-
-## Full training
-
-Authenticate WandB and run:
+This is the command used for the final 20-epoch Kaggle run:
 
 ```bash
 python train.py -cn=lcnn \
-  writer.run_name=lcnn_stft_ce_seed1 \
-  trainer.seed=1
+  writer.run_name=lcnn_stft_ce_repeat_seed1_full20 \
+  writer.project_name=voice-anti-spoofing \
+  writer.mode=online \
+  writer.log_checkpoints=false \
+  trainer.seed=1 \
+  trainer.n_epochs=20 \
+  trainer.save_period=1 \
+  trainer.use_amp=true \
+  dataloader.batch_size=8 \
+  dataloader.num_workers=4 \
+  dataloader.pin_memory=true \
+  dataloader.persistent_workers=true
 ```
 
-Useful overrides include:
+The default optimizer is Adam with a learning rate of `3e-4`. StepLR halves
+the learning rate every ten epochs. The trainer saves checkpoints under
+`saved/<run_name>/` and selects `model_best.pth` using development EER.
 
-```bash
-# Smaller batch when GPU memory is limited
-python train.py -cn=lcnn dataloader.batch_size=4
+## Evaluation and submission
 
-# Offline logging
-python train.py -cn=lcnn writer.mode=offline
-
-# Resume an interrupted named run
-python train.py -cn=lcnn \
-  writer.run_name=lcnn_stft_ce_seed1 \
-  trainer.resume_from=checkpoint-epoch10.pth
-```
-
-The trainer logs `loss_train`, `Accuracy_train`, `loss_dev`, `Accuracy_dev`,
-and `EER_dev`. `EER_dev` is computed once from all development scores, not as
-an invalid average of per-batch EERs. The best checkpoint is selected with
-`min dev_EER` and saved to:
-
-```text
-saved/<run_name>/model_best.pth
-```
-
-Do not choose checkpoints or hyperparameters using evaluation labels. Because
-the comparative study found substantial seed sensitivity, report the seed and,
-when compute permits, run more than one seed.
-
-## Evaluation inference and submission
-
-Run the best development-selected checkpoint over the evaluation partition:
+Run inference with the checkpoint selected on the development set:
 
 ```bash
 python inference.py -cn=lcnn_inference \
   inferencer.from_pretrained=/absolute/path/to/model_best.pth \
-  inferencer.submission_filename=your_university_username.csv
+  inferencer.submission_filename=your_university_username.csv \
+  dataloader.batch_size=8 \
+  dataloader.num_workers=4
 ```
 
-The resulting file is:
-
-```text
-data/saved/submissions/your_university_username.csv
-```
-
-It has no header and contains exactly two comma-separated fields per row:
+The CSV is written to `data/saved/submissions/`. It has no header and contains
+one score for each evaluation trial:
 
 ```text
 LA_E_2834763,-1.238475
 LA_E_8877452,2.193841
 ```
 
-Use the official university username in the filename. Validate the file against
-the evaluation protocol before submission:
+Before submission, the file can be checked against the evaluation protocol:
 
 ```bash
-python scripts/validate_submission.py \
+python -m scripts.validate_submission \
   data/saved/submissions/your_university_username.csv \
   "$ASVSPOOF_LA_ROOT/ASVspoof2019_LA_cm_protocols/ASVspoof2019.LA.cm.eval.trl.txt"
 ```
 
-The script enforces unique keys, finite soft scores, exact protocol coverage,
-and reports EER with the same discrete implementation as the course grader.
-EER is printed in percent on the 0--100 scale. The full-performance target is
-below 5.3%.
-
-## Report plots
-
-Export the WandB run history as CSV and generate figures rather than using
-screenshots:
-
-```bash
-python scripts/plot_training_history.py wandb_history.csv \
-  --output training_history.png
-```
-
-If WandB changes exported column names, pass `--train-loss`, `--dev-loss`, or
-`--dev-eer` explicitly. The report should describe the task, EER, LCNN/MFM,
-experimental settings, one-batch test, development trajectory, final evaluation
-result, limitations, and conclusions.
+The final model produced 71,237 scores and achieved an evaluation EER of
+**6.418526%**.
 
 ## References
 
@@ -246,9 +159,6 @@ result, limitations, and conclusions.
    Countermeasures for Synthetic Speech Detection*, Interspeech 2021.
 4. ASVspoof consortium, *ASVspoof 2019 Evaluation Plan*.
 
-## Template attribution
-
-This project is based on the
+This repository is a modified version of the
 [PyTorch Project Template](https://github.com/Blinorot/pytorch_project_template)
-used in the HSE DLA course. Its Hydra, logging, trainer, and checkpointing
-structure has been retained and extended for voice anti-spoofing.
+used in the HSE DLA course.
